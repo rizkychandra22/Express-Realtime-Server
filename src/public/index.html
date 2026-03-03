@@ -169,7 +169,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Dashboard Room Chat</title>
+    <!-- <title>Dashboard Room Chat</title> -->
     <script src="/socket.io/socket.io.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; display: flex; flex-direction: column; height: 100vh; }
@@ -216,7 +216,7 @@
     </div>
 
     <div class="header">
-        <strong>Room Chat</strong> | <span id="my-name">Guest</span>
+        <strong id="chat-title">Pilih Teman Chat</strong> | <span id="my-name">Guest</span>
     </div>
 
     <div class="container">
@@ -236,7 +236,116 @@
         </div>
     </div>
 
-    <script>
+    <!-- Fungsi Realtime dengan database dengan Private -->
+     <script>
+        let socket;
+        let myName = "";
+        let selectedTargetDbId = null; // Simpan ID database target, bukan socketId
+
+        async function handleLogin() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                myName = data.user.name;
+                document.title = `Dashboard - ${myName}`;
+                document.getElementById('my-name').innerText = myName;
+                document.getElementById('login-screen').style.display = 'none';
+                initSocket(data.token);
+            } else {
+                alert(data.error || "Login Failed");
+            }
+        }
+
+        function initSocket(token) {
+            socket = io({ auth: { token } });
+
+            // 1. Menampilkan daftar user online (Menggunakan dbId)
+            socket.on('online_list', (users) => {
+                const list = document.getElementById('user-list');
+                const count = document.getElementById('count');
+                list.innerHTML = "";
+                
+                const filteredUsers = users.filter(u => u.name !== myName);
+                count.innerText = filteredUsers.length;
+
+                filteredUsers.forEach(user => {
+                    const div = document.createElement('div');
+                    div.className = 'user-item';
+                    div.innerHTML = `<strong>${user.name}</strong><small>${user.role.toUpperCase()}</small>`;
+                    
+                    div.onclick = () => {
+                        selectedTargetDbId = user.dbId; // Ambil ID asli dari database
+
+                        // Update secara realtime untuk bergabung ke room private berdasarkan IdUser
+                        socket.emit('join_private_room', { targetUserId: user.dbId });
+
+                        document.getElementById('chat-title').innerText = `Chatting with ${user.name}`;
+                        document.querySelectorAll('.user-item').forEach(el => el.classList.remove('selected'));
+                        div.classList.add('selected');
+                        
+                        document.getElementById('msg-input').disabled = false;
+                        document.getElementById('msg-input').placeholder = `Ketik pesan untuk ${user.name}...`;
+                        document.getElementById('send-btn').disabled = false;
+                    };
+                    list.appendChild(div);
+                });
+            });
+
+            // 2. Menerima Histori Chat dari Database
+            socket.on('load_history', (history) => {
+                const window = document.getElementById('chat-window');
+                window.innerHTML = ""; // Bersihkan layar chat saat ganti teman
+                history.forEach(data => {
+                    appendMessage(data);
+                });
+            });
+
+            // 3. Menerima pesan private baru (Real-time)
+            socket.on('receive_private_message', (data) => {
+                appendMessage(data);
+            });
+        }
+
+        // Fungsi pembantu untuk merender pesan di UI
+        function appendMessage(data) {
+            const window = document.getElementById('chat-window');
+            // Cek apakah pengirim adalah diri sendiri berdasarkan nama
+            const isMe = data.user === myName;
+            
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${isMe ? 'sent' : 'received'}`;
+            msgDiv.innerHTML = `
+                <span class="message-info">${isMe ? 'Anda' : data.user} • ${data.time}</span>
+                ${data.text}
+            `;
+            window.appendChild(msgDiv);
+            window.scrollTop = window.scrollHeight;
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('msg-input');
+            
+            // Kirim ke event 'send_private_message' dengan format Object
+            if (input.value.trim() && selectedTargetDbId) {
+                socket.emit('send_private_message', {
+                    targetUserId: selectedTargetDbId, 
+                    text: input.value
+                });
+                input.value = "";
+            }
+        }
+    </script>
+
+    <!-- Fungsi Realtime dengan Event Broadcast -->
+    <!-- <script>
         let socket;
         let myName = "";
         let selectedTarget = null;
@@ -254,6 +363,7 @@
             const data = await res.json();
             if (res.ok) {
                 myName = data.user.name;
+                document.title = `Dashboard - ${myName}`;
                 document.getElementById('my-name').innerText = myName;
                 document.getElementById('login-screen').style.display = 'none';
                 initSocket(data.token);
@@ -265,7 +375,7 @@
         function initSocket(token) {
             socket = io({ auth: { token } });
 
-            // Menerima daftar user online yang sudah login
+            // Menampilkan daftar user online yang sudah login
             socket.on('online_list', (users) => {
                 const list = document.getElementById('user-list');
                 const count = document.getElementById('count');
@@ -278,19 +388,24 @@
                     const div = document.createElement('div');
                     div.className = 'user-item';
                     div.innerHTML = `<strong>${user.name}</strong><small>${user.role.toUpperCase()}</small>`;
+                    
+                    // Clik untuk memilih user yang akan di-chat
                     div.onclick = () => {
                         selectedTarget = user.socketId;
+
+                        // Teks "Room Chat" nama user yang sedang di-chat
+                        document.getElementById('chat-title').innerText = `Chatting with ${user.name}`;
                         document.querySelectorAll('.user-item').forEach(el => el.classList.remove('selected'));
                         div.classList.add('selected');
                         document.getElementById('msg-input').disabled = false;
-                        document.getElementById('msg-input').placeholder = `Chat with ${user.name}...`;
+                        document.getElementById('msg-input').placeholder = `Ketik pesan untuk ${user.name}...`;
                         document.getElementById('send-btn').disabled = false;
                     };
                     list.appendChild(div);
                 });
             });
 
-            // Menerima pesan
+            // Menerima pesan baru
             socket.on('receive_message', (data) => {
                 const window = document.getElementById('chat-window');
                 const isMe = data.user === myName;
@@ -313,6 +428,6 @@
                 input.value = "";
             }
         }
-    </script>
+    </script> -->
 </body>
 </html>

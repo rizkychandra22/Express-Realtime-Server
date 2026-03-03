@@ -4,9 +4,11 @@ import runMigrations from '../migrations/allRunningSchema.js';
 function initDatabase() {
     const db = new sqlite3.Database('database.db', (err) => {
         if (err) {
-            console.error(`==========================================\nGagal koneksi ke database SQLite: ${err.message}`);
+            console.error(`==========================================\nGagal koneksi ke database SQLite: ${err.message}\n==========================================`);
         } else {
-            console.log(`==========================================\nKoneksi ke database SQLite berhasil!`);
+            // Aktifkan foreign key untuk relasi antar tabel bisa dijalankan
+            db.run("PRAGMA foreign_keys = ON");
+            console.log(`==========================================\nKoneksi ke database SQLite berhasil!\n==========================================`);
         }
     });
     

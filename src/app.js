@@ -8,55 +8,44 @@ import { fileURLToPath } from 'url';
 import jwt from 'jsonwebtoken';
 import initDatabase from './config/database.js';
 import authRoutes from './routes/authRoutes.js';
+import { saveMessage, getChatHistory } from './models/dbMessage.js';
 
 dotenv.config();
- 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const httpServer = createServer(app); 
+const io = new Server(httpServer, { cors: { origin: "*" } });
 
-// 1. Konfigurasi Socket.IO
-const io = new Server(httpServer, {
-  cors: { origin: "*" } 
-});
-
-// 2. Middleware Socket: Validasi Token JWT (Pintu Masuk Keamanan)
 io.use((socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) return next(new Error("Mohon login terlebih dahulu"));
-
     jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
         if (err) return next(new Error("Sesi berakhir, silahkan login ulang"));
-        
-        // Data 'decoded' berisi id, name, username, dan role dari authService
         socket.user = decoded; 
         next();
     });
 });
 
 const db = initDatabase();
-
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
-
-// Beri akses socket.io ke seluruh routes (digunakan di authController)
 app.set('io', io);
 
-// 3. Logika Utama Web Socket
 let onlineUsers = new Map(); 
 
+// Helper ID Room: ID kecil_ID besar (Contoh: 1_5)
+const getPrivateChatId = (id1, id2) => [id1, id2].sort((a, b) => a - b).join('_');
+
 io.on('connection', (socket) => {
-    const { name, role, username } = socket.user;       
+    const { id, name, role, username } = socket.user;       
+    onlineUsers.set(socket.id, { dbId: id, name, username, role });
     
-    // Simpan data user ke dalam memori (RAM)
-    onlineUsers.set(socket.id, { name, username, role });
-    
-    // Fungsi pembantu untuk mengirim daftar user online yang formal
     const broadcastOnlineList = () => {
-        const users = Array.from(onlineUsers.entries()).map(([id, data]) => ({
-            socketId: id, // ID unik koneksi (penting untuk Private Chat)
+        const users = Array.from(onlineUsers.entries()).map(([sId, data]) => ({
+            socketId: sId,
+            dbId: data.dbId,
             name: data.name,
             role: data.role
         }));
@@ -66,17 +55,38 @@ io.on('connection', (socket) => {
     broadcastOnlineList();
     console.log(`[Socket] ${name} (${role}) terhubung.`);
 
-    // Event: Menerima pesan dan menyebarkannya (Broadcast)
-    socket.on('send_message', (text) => {
-        io.emit('receive_message', {
-            user: name, // Menggunakan Nama Lengkap dari JWT
-            role: role, 
-            text: text,
-            time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-        });
+    // Join Room & Muat Histori
+    socket.on('join_private_room', async ({ targetUserId }) => {
+        const chatRoomId = getPrivateChatId(id, targetUserId);
+        socket.join(chatRoomId);
+        try {
+            const rawHistory = await getChatHistory(db, chatRoomId);
+            const history = rawHistory.map(h => ({
+                ...h,
+                time: new Date(h.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+            }));
+            socket.emit('load_history', history);
+        } catch (err) {
+            console.error("Gagal muat histori:", err.message);
+        }
     });
 
-    // Event: User terputus (Tutup Tab / Logout)
+    // Kirim Pesan Private
+    socket.on('send_private_message', async ({ targetUserId, text }) => {
+        const chatRoomId = getPrivateChatId(id, targetUserId);
+        try {
+            await saveMessage(db, id, chatRoomId, text);
+            io.to(chatRoomId).emit('receive_private_message', {
+                sender_id: id,
+                user: name,
+                text: text,
+                time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+            });
+        } catch (err) {
+            console.error("Gagal simpan pesan:", err.message);
+        }
+    });
+
     socket.on('disconnect', () => {
         onlineUsers.delete(socket.id);
         broadcastOnlineList();
@@ -84,14 +94,8 @@ io.on('connection', (socket) => {
     });
 });
 
-// 4. Routes API
 app.use('/api/auth', authRoutes(db));
-
-app.get('/', (req, res) => {
-  res.send('Server Web Socket Aktif!');
-});
-
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
-    console.log(`==========================================\nServer berjalan di http://localhost:${PORT}\nWeb Socket siap menerima koneksi....`);
+    console.log(`Server berjalan di http://localhost:${PORT}\nWeb Socket siap menerima koneksi....`);
 });

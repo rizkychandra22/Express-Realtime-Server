@@ -12,9 +12,9 @@ function createUserTable(db) {
         );
     `, (err) => {
         if (err) {
-            console.error(`==========================================\nGagal membuat table users: ${err.message}\n==========================================`);
+            console.error(`Gagal membuat table users: ${err.message}\n==========================================`);
         } else {
-            console.log(`==========================================\nTable users siap digunakan...!\n==========================================`);
+            console.log(`Table users siap digunakan...!\n==========================================`);
         }
     });
 }
