@@ -9,7 +9,7 @@ export async function registerUser(db, user) {
         db.run(
             `INSERT INTO users (name, username, email, password, role)
              VALUES (?, ?, ?, ?, ?)`,
-            [name, username, email, hashedPassword, role || 'student'],
+            [name, username, email, hashedPassword, role || 'user'],
             function (err) {
                 if (err) reject(err);
                 else resolve({ id: this.lastID });

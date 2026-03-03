@@ -4,7 +4,7 @@ import { registerUser } from "../models/dbUser.js";
 
 export async function registerService(db, user) {
     const { name, username, email, password, role } = user;
-    const allowedRoles = ['root', 'admin', 'finance', 'teacher', 'student'];
+    const allowedRoles = ['admin', 'user'];
 
     if (!name) throw new Error('Name cannot be empty');
     if (!username) throw new Error('Username cannot be empty');
